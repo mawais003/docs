@@ -1,189 +1,77 @@
-# Here is a detailed step-by-step guide to install and configure the ELK stack (Elasticsearch, Logstash, Kibana) on Ubuntu 20.04 to receive logs from Filebeat on a remote server:
+# ELK-Stack Installation and Configurations
 
-**Prerequisites**
+Here is the general and broader level concept of elk-stack with filebeat
 
-- Two Ubuntu 20.04 servers: one for the ELK stack and one remote server running Filebeat to send logs to the ELK server.
-- Ensure both servers have at least 4GB RAM and 2 CPU cores.
-- Open the required ports between the servers:
-- Filebeat to Logstash: 5044
-- Elasticsearch: 9200
-- Kibana: 5601
+![alt text](image-1.png)
 
-## Install Elasticsearch
+Logs ----~~**~~filebeat~~**~~----->  **Logstash** ---> **Elasticsearch** ---> **kibana**
 
-1. Import the Elasticsearch GPG key:
+- **Logstash**: Collect logs and events data. It even parses and transforms data
+- **ElasticSearch**: The transformed data from Logstash is Store, Search, and indexed.
+- **Kibana**: Kibana uses Elasticsearch DB to Explore, Visualize, and Share
 
-`wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch | sudo apt-key add -`
+And at the end, using the <elkstack-public-ip>:<kibana-port> we can see via kibana inside our browser. And we can also create dashboards of our own choices, for that we need our desired components to be parsed perfectly at logstash level.
 
-Output Prompt: `OK`
+Acttually logstash.conf file has three portions/sections :
 
-2. Add the Elasticsearch repository:
+1. Input : defines the address to which our logstash is listening to receive logs
+2. Filter : here we can apply our desired filters to parse data according to our requirements
+3. Output : It directs logstash where to forward this parsed data, it is generally directed to elasticsearch, so we give path for elasticsearch here.
 
-`echo "deb https://artifacts.elastic.co/packages/7.x/apt stable main" | sudo tee -a /etc/apt/sources.list.d/elastic-7.x.list`
+Here is the most simple way of setting up elk in a dockerized environment
 
-Output Prompt: `deb https://artifacts.elastic.co/packages/7.x/apt stable main`
+## Pre-requisities:
 
-3. Install Elasticsearch:
+- Linux server with docker and docker compose installed in it.
 
-`sudo apt update && sudo apt install elasticsearch`
+## Installing and Configuring ELK
 
-4. Enable and start Elasticsearch:
+Here are steps: 
 
-`sudo systemctl enable elasticsearch`
-`sudo systemctl start elasticsearch`
+1. Clone this repo in you server https://github.com/deviantony/docker-elk
+2. change the port mapping (if needed)
+3. change the passwords from `.env` file present inside this repo
+4. run `docker compose up --build -d`
+5. rest we can moniter and fix anythings (if happens) just like we play with docker containers.
 
-5. Verify Elasticsearch is running:
+## Installing and Configuring filebeat
 
-`curl -X GET "localhost:9200"`
+Actually we are using filebeat here to ship logs to logstash
 
-Output Prompt:
+Now is the turn to configure filebeat on a remote server (it can also be the same local server too)
 
-```
-{
-  "name" : "elk-stack",
-  "cluster_name" : "elasticsearch",
-  "cluster_uuid" : "xxx",
-  "version" : {
-    "number" : "7.17.22",
-    "build_flavor" : "default",
-    "build_type" : "deb",
-    "build_hash" : "38e9ca2e81304a821c50862dafab089ca863944b",
-    "build_date" : "2024-06-06T07:35:17.876121680Z",
-    "build_snapshot" : false,
-    "lucene_version" : "8.11.3",
-    "minimum_wire_compatibility_version" : "6.8.0",
-    "minimum_index_compatibility_version" : "6.0.0-beta1"
-  },
-  "tagline" : "You Know, for Search"
-}
+1. download rpm in that remote server --> `wget https://artifacts.elastic.co/downloads/beats/filebeat/filebeat-8.15.1-x86_64.rpm`
+2. now install this package `yum install filebeat-8.15.1-x86_64.rpm -y`
+3. you will find these or similar files/directories inside `/etc/filebeat`
+  - fields.yml  
+  - filebeat.reference.yml  
+  - filebeat.yml  
+  - modules.d
+4. we will define which logs we want to ship from isnide this filebeat.yml file
+
+Here is the simplified example of how this filebeat.yml should look like:
 
 ```
+filebeat.inputs:
+- type: log
+  enabled: true
+  paths:
+    - /var/log/mail.log
 
-## Install Logstash
+output.logstash:
+  hosts: ["<elk-server-ip>:<logstash-port>"]
 
-1. Install Logstash:
+# Additional logging configuration to capture logs in a file
+logging.level: debug
+logging.selectors: ["*"]
 
-`sudo apt install logstash`
-
-2. Create a Logstash configuration file:
-
-`sudo nano /etc/logstash/conf.d/02-beats-input.conf`
-
-- Add the following configuration:
-
+# Ensure logging output goes to a file
+logging.to_files: true
+logging.files:
+  path: /var/log/filebeat
+  name: filebeat
+  keepfiles: 7
+  permissions: 0644
+  rotateeverybytes: 10485760 # 10 MB
 ```
-input {
-  beats {
-    port => 5044
-  }
-}
-
-output {
-  elasticsearch {
-    hosts => ["localhost:9200"]
-    index => "%{[@metadata][beat]}-%{[@metadata][version]}-%{+YYYY.MM.dd}"
-  }
-}
-```
-
-3. Enable and start Logstash:
-
-`sudo systemctl enable logstash`
-`sudo systemctl start logstash`
-
-## Install Kibana
-
-1. Install Kibana:
-
-`sudo apt install kibana`
-
-2. Enable and start Kibana:
-
-`sudo systemctl enable kibana`
-`sudo systemctl start kibana`
-
-3. Changing path of log storage inside "/etc/elasticsearch/elasticsearch.yml"
-
-`path.data: /mnt/lvm/elasticsearch` ---> add this line, or if present update it accordingly.
-
-4. Ensure that Elasticsearch has the necessary permissions to read and write to this directory:
-
-`chown -R elasticsearch:elasticsearch /mnt/lvm/elasticsearch`
-`chmod -R 755 /mnt/lvm/elasticsearch`
-
-5. Kibana Configuration
-
-Ensure Kibana is configured to connect to Elasticsearch by modifying the Kibana configuration file (kibana.yml):
-
-`elasticsearch.hosts: ["http://localhost:9200"]` ---> add/modify this line according to requirement
-
-## To configure log rotation and deletion of old logs for Elasticsearch, follow these steps:
-
-1. Install Curator
-
-Curator is a tool from Elastic that helps manage Elasticsearch indices. Install it on your Elasticsearch server.
-
-```
-sudo apt-get update
-sudo apt-get install python3-pip
-sudo pip3 install elasticsearch-curator
-```
-
-2. Create Curator Configuration File
-
-Create the Curator configuration file at "/etc/curator/curator.yml"
-
-```
-# /etc/curator/curator.yml
-client:
-  hosts:
-    - 127.0.0.1
-  port: 9200
-  timeout: 30
-logging:
-  loglevel: INFO
-  logfile: /var/log/curator.log
-  logformat: default
-  blacklist: ['elasticsearch', 'urllib3']
-
-```
-
-3. Create Curator Action File
-
-Create the Curator action file at "/etc/curator/actions.yml"
-
-```
-# /etc/curator/actions.yml
-actions:
-  1:
-    action: delete_indices
-    description: "Delete indices older than 7 days"
-    options:
-      ignore_empty_list: True
-      timeout_override:
-      continue_if_exception: False
-      disable_action: False
-    filters:
-    - filtertype: pattern
-      kind: prefix
-      value: mail-logs-
-    - filtertype: age
-      source: name
-      direction: older
-      timestring: '%Y.%m.%d'
-      unit: days
-      unit_count: 7
-
-```
-
-4. Schedule Curator to Run Periodically
-
-Create a cron job to run Curator daily.
-
-- Open the crontab editor:
-  - `crontab -e`
-
-- Add the following line to run Curator every day at midnight:
-
-  - `0 0 * * * /usr/local/bin/curator --config /etc/curator/curator.yml /etc/curator/actions.yml`
 
